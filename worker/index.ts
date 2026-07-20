@@ -1,7 +1,8 @@
-import { lookupGooglePlace } from "../../../server/googlePlaces.ts"
+import { lookupGooglePlace } from "../server/googlePlaces.ts"
 
 interface Env {
   GOOGLE_PLACES_API_KEY?: string
+  ASSETS: Fetcher
 }
 
 // Tylko prawdziwe linki Google Maps — bez tego endpoint mógłby posłużyć jako
@@ -39,13 +40,15 @@ function json(body: unknown, status = 200): Response {
   })
 }
 
-export const onRequestPost: PagesFunction<Env> = async (context) => {
-  const apiKey = context.env.GOOGLE_PLACES_API_KEY
+async function handlePlacesLookup(
+  request: Request,
+  apiKey: string | undefined
+): Promise<Response> {
   if (!apiKey) {
     return json(
       {
         error:
-          "Import z Google Maps nie jest skonfigurowany na tym środowisku (brak sekretu GOOGLE_PLACES_API_KEY w Cloudflare Pages).",
+          "Import z Google Maps nie jest skonfigurowany na tym środowisku (brak sekretu GOOGLE_PLACES_API_KEY).",
       },
       500
     )
@@ -53,7 +56,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
   let body: unknown
   try {
-    body = await context.request.json()
+    body = await request.json()
   } catch {
     return json({ error: "Nieprawidłowe żądanie — oczekiwano JSON-a." }, 400)
   }
@@ -80,3 +83,18 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   }
 }
 
+export default {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    const url = new URL(request.url)
+
+    if (url.pathname === "/api/places/lookup") {
+      if (request.method !== "POST") {
+        return json({ error: "Metoda niedozwolona. Użyj POST." }, 405)
+      }
+      return handlePlacesLookup(request, env.GOOGLE_PLACES_API_KEY)
+    }
+
+    // Wszystko inne: statyczne pliki appki (dist/) + fallback SPA z wrangler.toml.
+    return env.ASSETS.fetch(request)
+  },
+}

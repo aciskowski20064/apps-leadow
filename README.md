@@ -14,7 +14,7 @@ iPhone), z danymi w Supabase — synchronizują się między urządzeniami po za
 - react-hook-form + zod (formularze i walidacja)
 - **Supabase** (Postgres + Auth + Row Level Security) — główne źródło danych
 - **vite-plugin-pwa** (manifest, service worker, instalowalność, offline dla powłoki aplikacji)
-- **Cloudflare Pages Functions** — serwerowy endpoint importu z Google Maps
+- **Cloudflare Workers** (Static Assets + Worker) — hosting appki i serwerowy endpoint importu z Google Maps
 - Dexie (IndexedDB) — tylko jako źródło jednorazowej migracji danych sprzed wprowadzenia Supabase
 
 ## Szybki start (lokalnie)
@@ -34,16 +34,19 @@ npm run dev
 Aplikacja wystartuje pod adresem podanym w konsoli (domyślnie `http://localhost:5173`). Bez
 skonfigurowanego Supabase ekran logowania pokaże czytelny komunikat zamiast się wywalać.
 
-Import z Google Maps w `npm run dev` **nie zadziała** — ten endpoint teraz obsługuje Cloudflare
-Pages Function, a nie Vite. Do pełnego testu lokalnego (razem z importem z Google Maps) użyj:
+Import z Google Maps w `npm run dev` **nie zadziała** — ten endpoint obsługuje Cloudflare Worker
+(`worker/index.ts`), a nie Vite. Do pełnego testu lokalnego (razem z importem z Google Maps) użyj:
 
 ```bash
+npm run build
 cp .dev.vars.example .dev.vars   # wklej GOOGLE_PLACES_API_KEY
 npm run dev:cf
 ```
 
-`npm run dev:cf` uruchamia `wrangler pages dev`, który proxuje do Vite i dodatkowo obsługuje
-`functions/api/places/lookup.ts` lokalnie, dokładnie tak jak na produkcji.
+`npm run dev:cf` uruchamia `wrangler dev`, czyli lokalny odpowiednik produkcyjnego Workera —
+serwuje zbudowaną appkę z `dist/` i obsługuje `/api/places/lookup` dokładnie tak jak na produkcji.
+Po każdej zmianie w `src/` trzeba przebudować (`npm run build`) — to nie ma hot-reloadu jak
+`npm run dev`.
 
 ## Konfiguracja Supabase
 
@@ -81,38 +84,45 @@ potrzebny na froncie; dostęp do danych chroni wyłącznie RLS + klucz `anon`.
 
 ## Konfiguracja Google Places (import z Google Maps)
 
-Endpoint `/api/places/lookup` to Cloudflare Pages Function
-([`functions/api/places/lookup.ts`](functions/api/places/lookup.ts)) — klucz Google nigdy nie
-trafia do kodu React ani do zmiennych `VITE_*`.
+Endpoint `/api/places/lookup` obsługuje Cloudflare Worker ([`worker/index.ts`](worker/index.ts),
+logika w [`server/googlePlaces.ts`](server/googlePlaces.ts)) — klucz Google nigdy nie trafia do
+kodu React ani do zmiennych `VITE_*`.
 
 1. [Google Cloud Console](https://console.cloud.google.com/apis/credentials) -> utwórz projekt,
    włącz płatne rozliczenia (Places API nie jest w pełni darmowe), włącz „Places API”.
 2. Utwórz klucz API.
 3. Ustaw go jako sekret:
    - **lokalnie**: plik `.dev.vars` (skopiuj `.dev.vars.example`), używany przez `npm run dev:cf`,
-   - **produkcyjnie**: Cloudflare Pages -> projekt -> **Settings -> Environment variables ->
-     Add secret** -> nazwa `GOOGLE_PLACES_API_KEY`.
+   - **produkcyjnie**: Cloudflare dashboard -> Twój Worker/projekt -> **Settings -> Variables and
+     Secrets -> Add -> Secret** -> nazwa `GOOGLE_PLACES_API_KEY`.
 
 Żeby całkowicie ukryć funkcję importu z Google Maps (np. nie chcesz płacić za Places API), ustaw
 `VITE_ENABLE_GOOGLE_IMPORT=false` w `.env` — przycisk i strona importu znikają, ręczne dodawanie
 leadów działa bez zmian.
 
-## Wdrożenie na Cloudflare Pages
+## Wdrożenie na Cloudflare
+
+Cloudflare łączy dziś Pages i Workers w jeden produkt — ten projekt wdraża się jako **Worker ze
+statycznymi zasobami** (Static Assets), nie jako klasyczny Pages. Worker serwuje zbudowaną appkę
+z `dist/` i dodatkowo obsługuje `/api/places/lookup`; routing SPA (odświeżanie podstron typu
+`/leady/123`) załatwia `not_found_handling = "single-page-application"` w `wrangler.toml`.
 
 1. Wypchnij repozytorium na GitHub/GitLab.
 2. W Cloudflare: **Workers & Pages -> Create -> Pages -> Connect to Git**, wybierz repozytorium.
 3. Ustawienia builda:
    - **Build command**: `npm run build`
-   - **Build output directory**: `dist`
-4. **Settings -> Environment variables** — dodaj dla środowiska Production (i Preview, jeśli
-   używasz):
-   - `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` (zwykłe zmienne)
-   - `GOOGLE_PLACES_API_KEY` jako **Secret** (opcjonalnie `VITE_ENABLE_GOOGLE_IMPORT=false`, jeśli
-     wolisz wyłączyć import)
-5. Deploy. Odświeżanie podstron (np. `/leady/123`) działa dzięki [`public/_redirects`](public/_redirects), który przekierowuje wszystkie ścieżki do `index.html` (React Router przejmuje routing po stronie klienta); `/api/*` obsługuje Cloudflare Function niezależnie od tej reguły.
+   - **Deploy command**: `npx wrangler deploy`
+4. Zmienne środowiskowe (**Settings -> Variables and Secrets**, lub przed pierwszym deployem w
+   formularzu tworzenia projektu):
+   - `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` — zwykłe zmienne, potrzebne w kroku *build*
+     (Vite wbudowuje je w kod)
+   - `GOOGLE_PLACES_API_KEY` jako **Secret** — potrzebny w kroku *deploy*/runtime Workera
+     (opcjonalnie `VITE_ENABLE_GOOGLE_IMPORT=false`, jeśli wolisz całkiem wyłączyć import)
+5. Deploy.
 
-`wrangler.toml` w repo ustawia nazwę projektu i katalog builda — przydatne przy wdrażaniu przez
-`npm run deploy` (`wrangler pages deploy`), ale nie jest wymagane przy wdrażaniu przez Git.
+`wrangler.toml` (`name`, `main`, `[assets]`) definiuje Workera — nazwa projektu w Cloudflare musi
+się z nim zgadzać (`name = "apps-leadow"` w tym repo). Lokalnie to samo robi `npm run deploy`
+(`wrangler deploy`).
 
 ## Instalacja jako aplikacja (PWA)
 
@@ -156,10 +166,10 @@ npm run preview
 ## Struktura projektu
 
 ```
-functions/
-  api/places/lookup.ts       – Cloudflare Pages Function: POST /api/places/lookup (produkcja + wrangler pages dev)
+worker/
+  index.ts                    – Cloudflare Worker: serwuje dist/ (Static Assets) + POST /api/places/lookup
 server/
-  googlePlaces.ts             – czysta logika: rozpoznawanie linku Maps, wywołania Places API, normalizacja (używana przez functions/)
+  googlePlaces.ts             – czysta logika: rozpoznawanie linku Maps, wywołania Places API, normalizacja (używana przez worker/)
 supabase/
   schema.sql                  – tabele, indeksy, RLS — do wklejenia w Supabase SQL Editor
 src/

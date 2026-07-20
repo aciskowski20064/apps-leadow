@@ -5,11 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:cf": "wrangler pages dev -- npm run dev",
+    "dev:cf": "wrangler dev",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "deploy": "npm run build && wrangler pages deploy"
+    "deploy": "npm run build && wrangler deploy"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
