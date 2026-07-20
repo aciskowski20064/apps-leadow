@@ -1,0 +1,10 @@
+# Sekrety dla Cloudflare Pages Functions w LOKALNYM developmencie
+# (`npm run dev:cf`, czyli `wrangler pages dev`). Skopiuj jako `.dev.vars`.
+# W produkcji ten sam sekret ustawia się w Cloudflare Pages: Settings ->
+# Environment variables -> Secret. Plik .dev.vars NIE trafia do repozytorium.
+
+# 1. https://console.cloud.google.com/apis/credentials — utwórz projekt,
+#    włącz billing (Places API nie jest w pełni darmowe).
+# 2. Włącz API: "Places API" (Maps Platform > APIs & Services > Library).
+# 3. Utwórz klucz API (Credentials > Create credentials > API key).
+GOOGLE_PLACES_API_KEY=
